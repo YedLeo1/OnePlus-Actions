@@ -38,7 +38,7 @@ static noinline uint64_t tee_invoke_command(uint64_t session_handle,
     uint64_t ret = 0xFFFFFFFFUL;
 
     asm volatile(
-        "mov lr, #0\n"
+        "mov x30, #0\n"
         "mov x29, sp\n"
         "blr %[tee_addr]\n"
         "mov sp, x29\n"
@@ -47,7 +47,7 @@ static noinline uint64_t tee_invoke_command(uint64_t session_handle,
         : [tee_addr] "r"(TEE_INVOKE_CMD_ADDR),
           "r"(x0), "r"(x1), "r"(x2), "r"(x3), "r"(x4), "r"(x5)
         : "memory", "x6", "x7", "x8", "x9", "x10", "x11",
-          "x12", "x13", "x14", "x15", "x16", "x17", "x18",
+          "x12", "x13", "x14", "x15", "x16", "x17",
           "x19", "x20", "x21", "x22", "x23", "x24", "x25",
           "x26", "x27", "x28", "x29", "x30"
     );
@@ -156,4 +156,4 @@ module_init(tz_tee_init);
 module_exit(tz_tee_exit);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("OnePlus 13T SM8750 TEE Call Module");
-MODULE_VERSION("2.1");
+MODULE_VERSION("2.2");
