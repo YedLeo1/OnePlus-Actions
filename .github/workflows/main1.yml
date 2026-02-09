@@ -1,0 +1,80 @@
+name: Full Kernel + Module Build
+on:
+  workflow_dispatch:
+    inputs:
+      CPU:
+        description: "CPU分支"
+        required: true
+        type: choice
+        options:
+          - 'sm8750'
+        default: 'sm8750'
+
+      FEIL:
+        description: "手机型号"
+        required: true
+        type: choice
+        options:
+          - 'oneplus_13t_b'
+        default: 'oneplus_13t_b'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout module
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y git curl build-essential flex bison libssl-dev libelf-dev zip lld bc
+
+      - name: Install repo
+        run: |
+          curl -sSL https://storage.googleapis.com/git-repo-downloads/repo > ~/repo
+          chmod +x ~/repo
+          sudo mv ~/repo /usr/local/bin/repo
+
+      - name: Sync kernel source
+        run: |
+          mkdir kernel_workspace && cd kernel_workspace
+          repo init -u https://github.com/Xiaomichael/kernel_manifest.git -b refs/heads/oneplus/${{ github.event.inputs.CPU }} -m ${{ github.event.inputs.FEIL }}.xml --depth=1
+          repo sync -c -j$(nproc) --no-tags --no-clone-bundle --force-sync
+
+      - name: Full kernel build
+        run: |
+          cd kernel_workspace/kernel_platform/common
+          export PATH="$PWD/../prebuilts/clang/host/linux-x86/clang-r510928/bin:$PATH"
+          make LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LD=ld.lld HOSTLD=ld.lld gki_defconfig
+          make -j$(nproc) \
+            LLVM=1 \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang \
+            LD=ld.lld \
+            HOSTLD=ld.lld
+
+      - name: Build module
+        run: |
+          cd kernel_workspace/kernel_platform
+          mkdir -p mymodule
+          cp $GITHUB_WORKSPACE/tz_tee_call.c mymodule/
+          echo "obj-m += tz_tee_call.o" > mymodule/Makefile
+
+          cd common
+          make -j$(nproc) \
+            LLVM=1 \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang \
+            LD=ld.lld \
+            HOSTLD=ld.lld \
+            M=$PWD/../mymodule \
+            modules
+
+      - name: Upload module
+        uses: actions/upload-artifact@v4
+        with:
+          name: tz_tee_call_module
+          path: kernel_workspace/kernel_platform/mymodule/tz_tee_call.ko
