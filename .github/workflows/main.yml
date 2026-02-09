@@ -221,8 +221,8 @@ jobs:
           # 创建模块源码目录
           mkdir -p kernel_workspace/module
           
-          # 将你的模块代码写入文件
-          cat > kernel_workspace/module/tz_tee_call.c << 'EOF'
+          # 写入模块源码（修复YAML语法：使用正确的缩进和引号）
+          cat > kernel_workspace/module/tz_tee_call.c << EOF
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/uaccess.h>
@@ -253,7 +253,7 @@ static noinline uint64_t tee_invoke_command(uint64_t session_handle,
                                            uint64_t return_origin) {
     // 1. 地址合法性校验（ARM64 4字节对齐）
     if (TEE_INVOKE_CMD_ADDR == 0 || (TEE_INVOKE_CMD_ADDR & 0x3) != 0) {
-        pr_err("TZ_TEE: 无效TEE地址 0x%llx\n", TEE_INVOKE_CMD_ADDR);
+        pr_err("TZ_TEE: 无效TEE地址 0x%llx\\n", TEE_INVOKE_CMD_ADDR);
         return 0xFFFFFFFF;
     }
 
@@ -270,11 +270,11 @@ static noinline uint64_t tee_invoke_command(uint64_t session_handle,
 
     // 3. 内联汇编调用（核心修复：保护栈/寄存器，避免TEE崩溃）
     asm volatile(
-        "mov lr, #0\n"                      // 清空LR，避免干扰TEE
-        "mov x29, sp\n"                     // 保存栈基址
-        "blr %[tee_addr]\n"                 // 调用TEE_InvokeTACommand
-        "mov sp, x29\n"                     // 恢复栈基址
-        "mov %[ret], x0\n"                  // 保存返回值
+        "mov lr, #0\\n"                      // 清空LR，避免干扰TEE
+        "mov x29, sp\\n"                     // 保存栈基址
+        "blr %[tee_addr]\\n"                 // 调用TEE_InvokeTACommand
+        "mov sp, x29\\n"                     // 恢复栈基址
+        "mov %[ret], x0\\n"                  // 保存返回值
         : [ret] "=r"(ret)
         : [tee_addr] "r"(TEE_INVOKE_CMD_ADDR),
           "r"(x0), "r"(x1), "r"(x2), "r"(x3), "r"(x4), "r"(x5)
@@ -284,7 +284,7 @@ static noinline uint64_t tee_invoke_command(uint64_t session_handle,
           "x26", "x27", "x28", "x29", "x30", "cpsr"
     );
 
-    pr_info("TZ_TEE: TEE调用返回 0x%llx (cmd_id=0x%llx)\n", ret, cmd_id);
+    pr_info("TZ_TEE: TEE调用返回 0x%llx (cmd_id=0x%llx)\\n", ret, cmd_id);
     return ret;
 }
 
@@ -297,20 +297,20 @@ static ssize_t tz_tee_write(struct file *filp, const char __user *buf,
 
     // 1. 权限校验（仅root可调用）
     if (!capable(CAP_SYS_ADMIN)) {
-        pr_err("TZ_TEE: 无ROOT权限 (UID=%d)\n", current_uid().val);
+        pr_err("TZ_TEE: 无ROOT权限 (UID=%d)\\n", current_uid().val);
         return -EPERM;
     }
 
     // 2. 长度校验（适配MCP的payload长度）
     if (len < sizeof(cmd_args) || len > MAX_PAYLOAD_LEN) {
-        pr_err("TZ_TEE: 无效长度 %zu (范围: %zu ~ %zu)\n", 
+        pr_err("TZ_TEE: 无效长度 %zu (范围: %zu ~ %zu)\\n", 
                len, sizeof(cmd_args), MAX_PAYLOAD_LEN);
         return -EINVAL;
     }
 
     // 3. 拷贝用户参数（入参数组）
     if (copy_from_user(cmd_args, buf, sizeof(cmd_args))) {
-        pr_err("TZ_TEE: 拷贝入参失败\n");
+        pr_err("TZ_TEE: 拷贝入参失败\\n");
         return -EFAULT;
     }
 
@@ -318,21 +318,21 @@ static ssize_t tz_tee_write(struct file *filp, const char __user *buf,
     payload_len = len - sizeof(cmd_args);
     kernel_payload = kzalloc(payload_len, GFP_KERNEL | GFP_DMA);  // 适配TEE内存
     if (!kernel_payload) {
-        pr_err("TZ_TEE: 分配内核内存失败\n");
+        pr_err("TZ_TEE: 分配内核内存失败\\n");
         return -ENOMEM;
     }
 
     if (copy_from_user(kernel_payload, buf + sizeof(cmd_args), payload_len)) {
-        pr_err("TZ_TEE: 拷贝payload失败\n");
+        pr_err("TZ_TEE: 拷贝payload失败\\n");
         kfree(kernel_payload);
         return -EFAULT;
     }
 
     // 5. 打印调试信息（方便定位问题）
-    pr_info("TZ_TEE: 开始调用TEE函数\n");
-    pr_info("TZ_TEE: 会话=0x%llx, 命令ID=0x%llx, Payload长度=0x%zx\n",
+    pr_info("TZ_TEE: 开始调用TEE函数\\n");
+    pr_info("TZ_TEE: 会话=0x%llx, 命令ID=0x%llx, Payload长度=0x%zx\\n",
             cmd_args[0], cmd_args[1], payload_len);
-    pr_info("TZ_TEE: TEE函数地址=0x%llx\n", TEE_INVOKE_CMD_ADDR);
+    pr_info("TZ_TEE: TEE函数地址=0x%llx\\n", TEE_INVOKE_CMD_ADDR);
 
     // 6. 调用TEE函数（传递参数+payload地址）
     tee_invoke_command(
@@ -364,7 +364,7 @@ static int __init tz_tee_init(void) {
 
     // 校验TEE地址
     if (TEE_INVOKE_CMD_ADDR == 0) {
-        pr_err("TZ_TEE: TEE函数地址未配置\n");
+        pr_err("TZ_TEE: TEE函数地址未配置\\n");
         return -EINVAL;
     }
 
@@ -372,7 +372,7 @@ static int __init tz_tee_init(void) {
     tz_tee_dev = MKDEV(DEV_MAJOR, DEV_MINOR);
     ret = register_chrdev_region(tz_tee_dev, 1, DEVICE_NAME);
     if (ret < 0) {
-        pr_err("TZ_TEE: 注册设备号失败 (ret=%d)\n", ret);
+        pr_err("TZ_TEE: 注册设备号失败 (ret=%d)\\n", ret);
         return ret;
     }
 
@@ -381,13 +381,13 @@ static int __init tz_tee_init(void) {
     tz_tee_cdev.owner = THIS_MODULE;
     ret = cdev_add(&tz_tee_cdev, tz_tee_dev, 1);
     if (ret < 0) {
-        pr_err("TZ_TEE: 添加设备失败 (ret=%d)\n", ret);
+        pr_err("TZ_TEE: 添加设备失败 (ret=%d)\\n", ret);
         unregister_chrdev_region(tz_tee_dev, 1);
         return ret;
     }
 
-    pr_info("TZ_TEE: 模块加载成功！TEE地址=0x%llx\n", TEE_INVOKE_CMD_ADDR);
-    pr_info("TZ_TEE: 设备节点: /dev/%s (主设备号=%d, 次设备号=%d)\n",
+    pr_info("TZ_TEE: 模块加载成功！TEE地址=0x%llx\\n", TEE_INVOKE_CMD_ADDR);
+    pr_info("TZ_TEE: 设备节点: /dev/%s (主设备号=%d, 次设备号=%d)\\n",
             DEVICE_NAME, DEV_MAJOR, DEV_MINOR);
     return 0;
 }
@@ -396,7 +396,7 @@ static int __init tz_tee_init(void) {
 static void __exit tz_tee_exit(void) {
     cdev_del(&tz_tee_cdev);
     unregister_chrdev_region(tz_tee_dev, 1);
-    pr_info("TZ_TEE: 模块卸载成功\n");
+    pr_info("TZ_TEE: 模块卸载成功\\n");
 }
 
 module_init(tz_tee_init);
@@ -407,20 +407,20 @@ MODULE_VERSION("2.0");
 EOF
           
           # 创建Makefile
-          cat > kernel_workspace/module/Makefile << 'EOF'
+          cat > kernel_workspace/module/Makefile << EOF
 obj-m += tz_tee_call.o
 KERNELDIR ?= ../kernel_platform/common
-PWD := $(shell pwd)
+PWD := \$(shell pwd)
 
 # 默认编译参数
 EXTRA_CFLAGS += -Wall -Wextra -O2
 EXTRA_CFLAGS += -DTZ_TEE_MODULE_BUILD
 
 all:
-	$(MAKE) -C $(KERNELDIR) M=$(PWD) O=$(KERNELDIR)/out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LD=ld.lld modules
+	\$(MAKE) -C \$(KERNELDIR) M=\$(PWD) O=\$(KERNELDIR)/out ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LD=ld.lld modules
 
 clean:
-	$(MAKE) -C $(KERNELDIR) M=$(PWD) O=$(KERNELDIR)/out ARCH=arm64 clean
+	\$(MAKE) -C \$(KERNELDIR) M=\$(PWD) O=\$(KERNELDIR)/out ARCH=arm64 clean
 EOF
           
           echo "✅ 模块源码和Makefile创建完成"
