@@ -105,22 +105,23 @@ jobs:
           repo init -u https://github.com/Xiaomichael/kernel_manifest.git -b refs/heads/oneplus/${{ github.event.inputs.CPU }} -m ${{ github.event.inputs.FEIL }}.xml --depth=1
           repo sync -c -j$(nproc) --no-tags --no-clone-bundle --force-sync
 
-      - name: Prepare kernel
+      - name: Prepare kernel config & scripts
         run: |
-          cd kernel_workspace
-          source build/envsetup.sh
-          lunch ${TARGET_PRODUCT}-${TARGET_BUILD_VARIANT}-${TARGET_ARCH}
-          cd kernel_platform/common
+          cd kernel_workspace/kernel_platform/common
+          export PATH="$PWD/../prebuilts/clang/host/linux-x86/clang-r510928/bin:$PATH"
+          export PATH="$PWD/../prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH"
+          export PATH="$PWD/../prebuilts/clang/host/linux-x86/clang-r450784e/bin:$PATH"
+          export PATH="$PWD/../prebuilts/clang/host/linux-x86/clang-r416183b/bin:$PATH"
           make LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LD=ld.lld HOSTLD=ld.lld gki_defconfig
           make LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LD=ld.lld HOSTLD=ld.lld prepare scripts
 
       - name: Build module
         run: |
           cd kernel_workspace/kernel_platform
-          mkdir -p modules/tz_tee_call
-          cp $GITHUB_WORKSPACE/tz_tee_call.c modules/tz_tee_call/
+          mkdir -p mymodule
+          cp $GITHUB_WORKSPACE/tz_tee_call.c mymodule/
           
-          cat > modules/tz_tee_call/Makefile << 'EOF'
+          cat > mymodule/Makefile << 'EOF'
           obj-m += tz_tee_call.o
           EOF
           
@@ -132,11 +133,11 @@ jobs:
             CC=clang \
             LD=ld.lld \
             HOSTLD=ld.lld \
-            M=$(pwd)/../modules/tz_tee_call \
+            M=$PWD/../mymodule \
             modules
 
       - name: Upload module
         uses: actions/upload-artifact@v4
         with:
           name: tz_tee_call_${{ github.event.inputs.FEIL }}_${{ github.event.inputs.KERNEL_VERSION }}.ko
-          path: kernel_workspace/kernel_platform/modules/tz_tee_call/tz_tee_call.ko
+          path: kernel_workspace/kernel_platform/mymodule/tz_tee_call.ko
