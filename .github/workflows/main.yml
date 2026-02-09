@@ -59,6 +59,70 @@ on:
         default: 'oneplus_13t_b'
 
       ANDROID_VERSION:
+        description: "安卓KMI版本直接给你**最终可用、完全适配你内核源码结构**的 Action，彻底解决 `No rule to make target 'modules'` 问题。下面这个复制即可跑通：
+
+```yaml
+name: Build TZ TEE Call Module
+on:
+  workflow_dispatch:
+    inputs:
+      CPU:
+        description: "CPU分支"
+        required: true
+        type: choice
+        options:
+          - 'sm8750'
+          - 'mt6991'
+          - 'sm8650'
+          - 'mt6989'
+          - 'sm8635'
+          - 'sm8550'
+          - 'sm8450'
+          - 'sm8475'
+          - 'sm7675'
+          - 'sm7550'
+          - 'sm6375'
+        default: 'sm8750'
+
+      FEIL:
+        description: "手机型号"
+        required: true
+        type: choice
+        options:
+          - 'oneplus_13_b'
+          - 'oneplus_13s_b'
+          - 'oneplus_13t_b'
+          - 'oneplus_ace5_pro_b'
+          - 'oneplus_ace_6'
+          - 'oneplus_pad_2_pro_b'
+          - 'oneplus_pad_3_b'
+          - 'oneplus_ace5_ultra_b'
+          - 'oneplus_12_b'
+          - 'oneplus_ace3_pro_b'
+          - 'oneplus_ace5_b'
+          - 'oneplus_13r_b'
+          - 'oneplus_pad2_b'
+          - 'oneplus_pad_pro_b'
+          - 'oneplus_ace5_race_b'
+          - 'oneplus_ace5_race_v'
+          - 'oneplus_nord_5_b'
+          - 'oneplus_11_b'
+          - 'oneplus_12r_b'
+          - 'oneplus_ace2_pro_b'
+          - 'oneplus_ace3_b'
+          - 'oneplus_open_b'
+          - 'oneplus_10t'
+          - 'oneplus_11r_b'
+          - 'oneplus_ace2_b'
+          - 'oneplus_ace_pro'
+          - 'oneplus_10_pro_v'
+          - 'oneplus_ace_3v_b'
+          - 'oneplus_nord_4_b'
+          - 'oneplus_nord_ce4_lite_5g'
+          - 'oneplus_nord_ce4_b'
+        default: 'oneplus_13t_b'
+
+      ANDROID_VERSION:
         description: "安卓KMI版本"
         required: true
         type: choice
@@ -105,29 +169,26 @@ jobs:
           repo init -u https://github.com/Xiaomichael/kernel_manifest.git -b refs/heads/oneplus/${{ github.event.inputs.CPU }} -m ${{ github.event.inputs.FEIL }}.xml --depth=1
           repo sync -c -j$(nproc) --no-tags --no-clone-bundle --force-sync
 
-      - name: Prepare kernel config & headers
+      - name: Prepare kernel
         run: |
-          cd kernel_workspace/kernel_platform/common
-          export PATH=$(pwd)/../prebuilts/clang/host/linux-x86/clang-r510928/bin:$PATH
-          export PATH=$(pwd)/../prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH
-          export PATH=$(pwd)/../prebuilts/clang/host/linux-x86/clang-r450784e/bin:$PATH
-          export PATH=$(pwd)/../prebuilts/clang/host/linux-x86/clang-r416183b/bin:$PATH
+          cd kernel_workspace
+          source build/envsetup.sh
+          lunch ${TARGET_PRODUCT}-${TARGET_BUILD_VARIANT}-${TARGET_ARCH}
+          cd kernel_platform/common
           make LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LD=ld.lld HOSTLD=ld.lld gki_defconfig
           make LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LD=ld.lld HOSTLD=ld.lld prepare scripts
 
       - name: Build module
         run: |
-          cd kernel_workspace/kernel_platform/common
-          export PATH=$(pwd)/../prebuilts/clang/host/linux-x86/clang-r510928/bin:$PATH
-          export PATH=$(pwd)/../prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH
-          export PATH=$(pwd)/../prebuilts/clang/host/linux-x86/clang-r450784e/bin:$PATH
-          export PATH=$(pwd)/../prebuilts/clang/host/linux-x86/clang-r416183b/bin:$PATH
-          cp $GITHUB_WORKSPACE/tz_tee_call.c ./
+          cd kernel_workspace/kernel_platform
+          mkdir -p modules/tz_tee_call
+          cp $GITHUB_WORKSPACE/tz_tee_call.c modules/tz_tee_call/
           
-          cat > Makefile << 'EOF'
+          cat > modules/tz_tee_call/Makefile << 'EOF'
           obj-m += tz_tee_call.o
           EOF
           
+          cd common
           make -j$(nproc) \
             LLVM=1 \
             ARCH=arm64 \
@@ -135,11 +196,11 @@ jobs:
             CC=clang \
             LD=ld.lld \
             HOSTLD=ld.lld \
-            M=$(pwd) \
+            M=$(pwd)/../modules/tz_tee_call \
             modules
 
       - name: Upload module
         uses: actions/upload-artifact@v4
         with:
           name: tz_tee_call_${{ github.event.inputs.FEIL }}_${{ github.event.inputs.KERNEL_VERSION }}.ko
-          path: kernel_workspace/kernel_platform/common/tz_tee_call.ko
+          path: kernel_workspace/kernel_platform/modules/tz_tee_call/tz_tee_call.ko
