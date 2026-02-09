@@ -91,7 +91,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y git curl build-essential flex bison libssl-dev libelf-dev zip
+          sudo apt install -y git curl build-essential flex bison libssl-dev libelf-dev zip lld
 
       - name: Install repo
         run: |
@@ -108,12 +108,20 @@ jobs:
       - name: Prepare kernel config & headers
         run: |
           cd kernel_workspace/kernel_platform/common
-          make LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang gki_defconfig
-          make LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang prepare scripts
+          export PATH=$(pwd)/../prebuilts/clang/host/linux-x86/clang-r510928/bin:$PATH
+          export PATH=$(pwd)/../prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH
+          export PATH=$(pwd)/../prebuilts/clang/host/linux-x86/clang-r450784e/bin:$PATH
+          export PATH=$(pwd)/../prebuilts/clang/host/linux-x86/clang-r416183b/bin:$PATH
+          make LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LD=ld.lld HOSTLD=ld.lld gki_defconfig
+          make LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LD=ld.lld HOSTLD=ld.lld prepare scripts
 
       - name: Build module
         run: |
           cd kernel_workspace/kernel_platform/common
+          export PATH=$(pwd)/../prebuilts/clang/host/linux-x86/clang-r510928/bin:$PATH
+          export PATH=$(pwd)/../prebuilts/clang/host/linux-x86/clang-r487747c/bin:$PATH
+          export PATH=$(pwd)/../prebuilts/clang/host/linux-x86/clang-r450784e/bin:$PATH
+          export PATH=$(pwd)/../prebuilts/clang/host/linux-x86/clang-r416183b/bin:$PATH
           cp $GITHUB_WORKSPACE/tz_tee_call.c ./
           
           cat > Makefile << 'EOF'
@@ -125,6 +133,8 @@ jobs:
             ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CC=clang \
+            LD=ld.lld \
+            HOSTLD=ld.lld \
             M=$(pwd) \
             modules
 
