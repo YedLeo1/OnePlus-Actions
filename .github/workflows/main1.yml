@@ -1,81 +1,111 @@
-name: Build TEE Module + AnyKernel3
+name: Kernel + TEE Module Builder
 on:
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-24.04
+  kernel-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
-      - name: Checkout module
+      - name: Checkout Kernel Source
         uses: actions/checkout@v4
+        with:
+          repository: whitewhale0612/android_kernel_common_oneplus_sm8750
+          ref: v11
+          path: kernel_source
 
-      - name: Install dependencies
+      - name: Checkout module source
+        uses: actions/checkout@v4
+        with:
+          path: module_source
+
+      - name: Check branch info
         run: |
-          sudo apt update
-          sudo apt install -y \
-            git curl build-essential flex bison libssl-dev libelf-dev \
-            zip lld bc cpio python3
+          cd kernel_source
+          echo "当前分支: $(git branch --show-current)"
+          echo "HEAD commit: $(git rev-parse HEAD)"
+          cd ~
 
-      - name: Clone OnePlus SM8750-C16 kernel
+      - name: Setup zyclang Toolchain
         run: |
-          git clone https://github.com/whitewhale0612/android_kernel_common_oneplus_sm8750-C16 kernel
+          echo "正在克隆zyClang19工具链..."
+          mkdir -p clang
+          aria2c -s16 -x16 -k1M https://github.com/ZyCromerZ/Clang/releases/download/19.0.0git-20240723-release/Clang-19.0.0git-20240723.tar.gz -o clang.tar.gz
+          tar -xzf clang.tar.gz -C clang
 
-      - name: Download Clang + GCC
+      - name: Install Build Dependencies
         run: |
-          # Clang
-          curl -SL https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-14.0.0_r15/clang-r510928.tar.gz | tar -xz -C $GITHUB_WORKSPACE
-          mv $GITHUB_WORKSPACE/clang-r510928 $GITHUB_WORKSPACE/clang
+          sudo apt-get update
+          sudo apt-get install -y \
+            git make python3 flex bison libssl-dev libncurses-dev \
+            bc rsync kmod cpio lbzip2 device-tree-compiler \
+            libelf-dev ccache pahoe
+          sudo apt install -y aria2
 
-          # GCC
-          curl -SL https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-14.0.0_r15.tar.gz | tar -xz -C $GITHUB_WORKSPACE/gcc
-
-      - name: Build kernel
+      - name: Configure & Build Kernel
         run: |
-          cd kernel
-          export PATH=$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc/bin:$PATH
-          make LLVM=1 \
-            ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-android- \
-            CC=clang \
-            LD=ld.lld \
-            HOSTLD=ld.lld \
-            oneplus_sm8750_defconfig
+          WORKDIR="$(pwd)"
+          export PATH="$WORKDIR/clang/bin:$PATH"
 
-          make -j$(nproc) LLVM=1 \
-            ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-android- \
-            CC=clang \
-            LD=ld.lld \
-            HOSTLD=ld.lld
+          cd kernel_source
+          make ARCH=arm64 SUBARCH=arm64 O=out \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CC="clang" \
+            CXX="clang++" \
+            HOSTCC="clang" \
+            HOSTCXX="clang++" \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            gki_defconfig
 
+          make -j$(nproc) ARCH=arm64 SUBARCH=arm64 O=out \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CC="clang" \
+            CXX="clang++" \
+            HOSTCC="clang" \
+            HOSTCXX="clang++" \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+
+      # 编译你的 tz_tee_call.ko 模块
       - name: Build tz_tee_call module
         run: |
-          mkdir -p module
-          cp $GITHUB_WORKSPACE/tz_tee_call.c module/
-          echo "obj-m += tz_tee_call.o" > module/Makefile
+          WORKDIR="$(pwd)"
+          export PATH="$WORKDIR/clang/bin:$PATH"
 
-          cd kernel
-          export PATH=$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc/bin:$PATH
-          make -j$(nproc) LLVM=1 \
-            ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-android- \
-            CC=clang \
-            LD=ld.lld \
-            HOSTLD=ld.lld \
-            M=$GITHUB_WORKSPACE/module \
+          cd kernel_source
+          mkdir -p mymodule
+          cp $WORKDIR/module_source/tz_tee_call.c mymodule/
+          echo "obj-m += tz_tee_call.o" > mymodule/Makefile
+
+          make -j$(nproc) ARCH=arm64 SUBARCH=arm64 O=out \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CC="clang" \
+            CXX="clang++" \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            M=$PWD/mymodule \
             modules
 
+      # 打包 AnyKernel3
       - name: Pack AnyKernel3
         run: |
           git clone https://github.com/osm0sis/AnyKernel3.git AK3
-          cp $GITHUB_WORKSPACE/module/tz_tee_call.ko AK3/
+          cp kernel_source/mymodule/tz_tee_call.ko AK3/
           cd AK3
-          zip -r9 TZ_TEE_CALL_AK3.zip ./*
+          zip -r9 TZ_TEE_AK3.zip ./*
 
-      - name: Upload artifact
+      - name: Upload All
         uses: actions/upload-artifact@v4
         with:
-          name: RESULT
+          name: SM8750_FULL_PACKAGE
           path: |
-            module/tz_tee_call.ko
-            AK3/TZ_TEE_CALL_AK3.zip
+            kernel_source/out/arch/arm64/boot/Image.gz
+            kernel_source/mymodule/tz_tee_call.ko
+            AK3/TZ_TEE_AK3.zip
