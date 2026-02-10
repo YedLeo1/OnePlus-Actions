@@ -16,18 +16,19 @@ jobs:
             git curl build-essential flex bison libssl-dev libelf-dev \
             zip lld bc cpio python3
 
-      # 克隆你指定的内核
       - name: Clone OnePlus SM8750-C16 kernel
         run: |
           git clone https://github.com/whitewhale0612/android_kernel_common_oneplus_sm8750-C16 kernel
 
-      # 安装工具链（clang-r510928 匹配这个内核）
-      - name: Download clang
+      - name: Download Clang + GCC
         run: |
-          git clone https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r510928.git clang
-          git clone https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc
+          # Clang
+          curl -SL https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/tags/android-14.0.0_r15/clang-r510928.tar.gz | tar -xz -C $GITHUB_WORKSPACE
+          mv $GITHUB_WORKSPACE/clang-r510928 $GITHUB_WORKSPACE/clang
 
-      # 编译内核（必须完整编译，才能编模块）
+          # GCC
+          curl -SL https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-14.0.0_r15.tar.gz | tar -xz -C $GITHUB_WORKSPACE/gcc
+
       - name: Build kernel
         run: |
           cd kernel
@@ -35,7 +36,6 @@ jobs:
           make LLVM=1 \
             ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-android- \
-            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
             CC=clang \
             LD=ld.lld \
             HOSTLD=ld.lld \
@@ -48,7 +48,6 @@ jobs:
             LD=ld.lld \
             HOSTLD=ld.lld
 
-      # 编译模块
       - name: Build tz_tee_call module
         run: |
           mkdir -p module
@@ -66,18 +65,17 @@ jobs:
             M=$GITHUB_WORKSPACE/module \
             modules
 
-      # 打包 AnyKernel3
       - name: Pack AnyKernel3
         run: |
           git clone https://github.com/osm0sis/AnyKernel3.git AK3
           cp $GITHUB_WORKSPACE/module/tz_tee_call.ko AK3/
           cd AK3
-          zip -r9 TZ_TEE_CALL_AK3.zip *
+          zip -r9 TZ_TEE_CALL_AK3.zip ./*
 
-      - name: Upload module + AK3
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: OUTPUT
+          name: RESULT
           path: |
             module/tz_tee_call.ko
             AK3/TZ_TEE_CALL_AK3.zip
