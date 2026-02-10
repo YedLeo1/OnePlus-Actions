@@ -1,22 +1,6 @@
-name: Full Kernel + Module Build
+name: Build TEE Module + AnyKernel3
 on:
   workflow_dispatch:
-    inputs:
-      CPU:
-        description: "CPU分支"
-        required: true
-        type: choice
-        options:
-          - 'sm8750'
-        default: 'sm8750'
-
-      FEIL:
-        description: "手机型号"
-        required: true
-        type: choice
-        options:
-          - 'oneplus_13t_b'
-        default: 'oneplus_13t_b'
 
 jobs:
   build:
@@ -28,53 +12,72 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y git curl build-essential flex bison libssl-dev libelf-dev zip lld bc
+          sudo apt install -y \
+            git curl build-essential flex bison libssl-dev libelf-dev \
+            zip lld bc cpio python3
 
-      - name: Install repo
+      # 克隆你指定的内核
+      - name: Clone OnePlus SM8750-C16 kernel
         run: |
-          curl -sSL https://storage.googleapis.com/git-repo-downloads/repo > ~/repo
-          chmod +x ~/repo
-          sudo mv ~/repo /usr/local/bin/repo
+          git clone https://github.com/whitewhale0612/android_kernel_common_oneplus_sm8750-C16 kernel
 
-      - name: Sync kernel source
+      # 安装工具链（clang-r510928 匹配这个内核）
+      - name: Download clang
         run: |
-          mkdir kernel_workspace && cd kernel_workspace
-          repo init -u https://github.com/Xiaomichael/kernel_manifest.git -b refs/heads/oneplus/${{ github.event.inputs.CPU }} -m ${{ github.event.inputs.FEIL }}.xml --depth=1
-          repo sync -c -j$(nproc) --no-tags --no-clone-bundle --force-sync
+          git clone https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r510928.git clang
+          git clone https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git gcc
 
-      - name: Full kernel build
+      # 编译内核（必须完整编译，才能编模块）
+      - name: Build kernel
         run: |
-          cd kernel_workspace/kernel_platform/common
-          export PATH="$PWD/../prebuilts/clang/host/linux-x86/clang-r510928/bin:$PATH"
-          make LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC=clang LD=ld.lld HOSTLD=ld.lld gki_defconfig
-          make -j$(nproc) \
-            LLVM=1 \
+          cd kernel
+          export PATH=$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc/bin:$PATH
+          make LLVM=1 \
             ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            CC=clang \
+            LD=ld.lld \
+            HOSTLD=ld.lld \
+            oneplus_sm8750_defconfig
+
+          make -j$(nproc) LLVM=1 \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-android- \
             CC=clang \
             LD=ld.lld \
             HOSTLD=ld.lld
 
-      - name: Build module
+      # 编译模块
+      - name: Build tz_tee_call module
         run: |
-          cd kernel_workspace/kernel_platform
-          mkdir -p mymodule
-          cp $GITHUB_WORKSPACE/tz_tee_call.c mymodule/
-          echo "obj-m += tz_tee_call.o" > mymodule/Makefile
+          mkdir -p module
+          cp $GITHUB_WORKSPACE/tz_tee_call.c module/
+          echo "obj-m += tz_tee_call.o" > module/Makefile
 
-          cd common
-          make -j$(nproc) \
-            LLVM=1 \
+          cd kernel
+          export PATH=$GITHUB_WORKSPACE/clang/bin:$GITHUB_WORKSPACE/gcc/bin:$PATH
+          make -j$(nproc) LLVM=1 \
             ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
             CC=clang \
             LD=ld.lld \
             HOSTLD=ld.lld \
-            M=$PWD/../mymodule \
+            M=$GITHUB_WORKSPACE/module \
             modules
 
-      - name: Upload module
+      # 打包 AnyKernel3
+      - name: Pack AnyKernel3
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3.git AK3
+          cp $GITHUB_WORKSPACE/module/tz_tee_call.ko AK3/
+          cd AK3
+          zip -r9 TZ_TEE_CALL_AK3.zip *
+
+      - name: Upload module + AK3
         uses: actions/upload-artifact@v4
         with:
-          name: tz_tee_call_module
-          path: kernel_workspace/kernel_platform/mymodule/tz_tee_call.ko
+          name: OUTPUT
+          path: |
+            module/tz_tee_call.ko
+            AK3/TZ_TEE_CALL_AK3.zip
